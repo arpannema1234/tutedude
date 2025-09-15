@@ -41,9 +41,9 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
         faceData,
         detectionEnabled,
         timeUntilDetection,
-        testViolation,
-        testAllViolations,
-        forceCheck,
+        // testViolation,
+        // testAllViolations,
+        // forceCheck,
     } = useComputerVision({
         videoRef: videoRef as React.RefObject<HTMLVideoElement>,
         canvasRef: canvasRef as React.RefObject<HTMLCanvasElement>,
