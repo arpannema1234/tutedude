@@ -125,35 +125,41 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
             Promise.allSettled([
                 // Send the violation event
                 fetch(
-                    `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/event`,
+                    `${
+                        import.meta.env.VITE_BACKEND_URL
+                    }/api/session/${sessionId}/event`,
                     {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(event),
                         signal: AbortSignal.timeout(3000), // 3 second timeout
                     }
-                ).then(response => {
+                ).then((response) => {
                     if (response.ok) {
                         console.log("Event sent to backend successfully");
                     }
                 }),
-                // Send the updated score to backend  
+                // Send the updated score to backend
                 fetch(
-                    `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/score`,
+                    `${
+                        import.meta.env.VITE_BACKEND_URL
+                    }/api/session/${sessionId}/score`,
                     {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ integrityScore: newScore }),
                         signal: AbortSignal.timeout(3000), // 3 second timeout
                     }
-                ).then(response => {
+                ).then((response) => {
                     if (response.ok) {
                         console.log("Score updated in backend successfully");
                     }
-                })
+                }),
             ]).catch(() => {
                 // Silently handle any backend failures
-                console.log("Backend not available - continuing with local state");
+                console.log(
+                    "Backend not available - continuing with local state"
+                );
             });
         }
     };
@@ -381,12 +387,14 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
     const fetchSessionInfo = async () => {
         try {
             const response = await fetch(
-                `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/status`,
+                `${
+                    import.meta.env.VITE_BACKEND_URL
+                }/api/session/${sessionId}/status`,
                 {
                     signal: AbortSignal.timeout(2000), // 2 second timeout
                 }
             );
-            
+
             if (response.ok) {
                 const data = await response.json();
                 if (data.sessionId) {
@@ -398,8 +406,10 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
             // Silently handle backend failures - use local session info
             if (!sessionInfo && sessionId) {
                 // Get candidate name from sessionStorage or use fallback
-                const storedName = sessionStorage.getItem(`candidate_${sessionId}`);
-                
+                const storedName = sessionStorage.getItem(
+                    `candidate_${sessionId}`
+                );
+
                 // Create minimal session info from available data
                 setSessionInfo({
                     sessionId,
@@ -465,7 +475,9 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
 
         try {
             const response = await fetch(
-                `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/upload-video`,
+                `${
+                    import.meta.env.VITE_BACKEND_URL
+                }/api/session/${sessionId}/upload-video`,
                 {
                     method: "POST",
                     body: formData,
@@ -491,13 +503,15 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
         // Stop all detection and recording immediately
         stopRecording();
         setDetectionEnabled(false);
-        
+
         setCurrentStatus("Interview ended - Generating report...");
 
         try {
             // Try to end session on backend (with timeout)
             const response = await fetch(
-                `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/end`,
+                `${
+                    import.meta.env.VITE_BACKEND_URL
+                }/api/session/${sessionId}/end`,
                 {
                     method: "PATCH",
                     signal: AbortSignal.timeout(3000), // 3 second timeout
@@ -508,16 +522,21 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
             if (response.ok) {
                 // Try to fetch final report from backend
                 const reportResponse = await fetch(
-                    `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/report`,
+                    `${
+                        import.meta.env.VITE_BACKEND_URL
+                    }/api/session/${sessionId}/report`,
                     {
                         signal: AbortSignal.timeout(3000), // 3 second timeout
                     }
                 );
-                
+
                 if (reportResponse.ok) {
                     reportData = await reportResponse.json();
                     // Merge with local events
-                    reportData.session.events = [...(reportData.session.events || []), ...localEvents];
+                    reportData.session.events = [
+                        ...(reportData.session.events || []),
+                        ...localEvents,
+                    ];
                     reportData.totalEvents = reportData.session.events.length;
                     console.log("Report fetched from backend:", reportData);
                 }
@@ -526,7 +545,7 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
             // If backend fails, create local report
             if (!reportData) {
                 console.log("Creating local report - backend unavailable");
-                
+
                 const eventStats = localEvents.reduce((stats, event) => {
                     stats[event.type] = (stats[event.type] || 0) + 1;
                     return stats;
@@ -537,8 +556,9 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
 
                 reportData = {
                     session: {
-                        _id: sessionId || 'local-session',
-                        candidateName: sessionInfo?.candidateName || "Interview Candidate", 
+                        _id: sessionId || "local-session",
+                        candidateName:
+                            sessionInfo?.candidateName || "Interview Candidate",
                         interviewerId: "local-session",
                         startTime: startTime.toISOString(),
                         endTime: now.toISOString(),
@@ -558,10 +578,9 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
             toast.success("Interview completed! Check your report below.", {
                 duration: 6000,
             });
-
         } catch (error) {
             console.log("Backend unavailable - using local data for report");
-            
+
             // Create completely local report
             const eventStats = localEvents.reduce((stats, event) => {
                 stats[event.type] = (stats[event.type] || 0) + 1;
@@ -573,9 +592,10 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
 
             const localReport = {
                 session: {
-                    _id: sessionId || 'local-session',
-                    candidateName: sessionInfo?.candidateName || "Interview Candidate",
-                    interviewerId: "local-session", 
+                    _id: sessionId || "local-session",
+                    candidateName:
+                        sessionInfo?.candidateName || "Interview Candidate",
+                    interviewerId: "local-session",
                     startTime: startTime.toISOString(),
                     endTime: now.toISOString(),
                     isActive: false,

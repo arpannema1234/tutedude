@@ -14,16 +14,18 @@ const InterviewSetup: React.FC = () => {
         }
 
         setLoading(true);
-        
+
         // Generate local session ID without backend dependency
-        const sessionId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
+        const sessionId = `local_${Date.now()}_${Math.random()
+            .toString(36)
+            .substr(2, 9)}`;
+
         // Store candidate name in sessionStorage for use in the interview
         sessionStorage.setItem(`candidate_${sessionId}`, candidateName.trim());
-        
+
         // Navigate directly to candidate view with local session
         navigate(`/candidate/${sessionId}`);
-        
+
         setLoading(false);
     };
 

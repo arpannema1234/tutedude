@@ -260,7 +260,9 @@ export const useObjectDetection = ({
             // Send to backend (fire and forget - don't block detection)
             if (sessionId) {
                 fetch(
-                    `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/event`,
+                    `${
+                        import.meta.env.VITE_BACKEND_URL
+                    }/api/session/${sessionId}/event`,
                     {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -268,15 +270,19 @@ export const useObjectDetection = ({
                         signal: AbortSignal.timeout(2000), // 2 second timeout
                     }
                 )
-                .then(response => {
-                    if (response.ok) {
-                        console.log("Object detection event sent to backend");
-                    }
-                })
-                .catch(() => {
-                    // Silently handle backend failures - continue with local detection
-                    console.log("Object detection continuing locally - backend unavailable");
-                });
+                    .then((response) => {
+                        if (response.ok) {
+                            console.log(
+                                "Object detection event sent to backend"
+                            );
+                        }
+                    })
+                    .catch(() => {
+                        // Silently handle backend failures - continue with local detection
+                        console.log(
+                            "Object detection continuing locally - backend unavailable"
+                        );
+                    });
             }
         }
     };
