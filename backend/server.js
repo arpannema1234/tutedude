@@ -92,7 +92,7 @@ app.post("/api/session/:id/event", async (req, res) => {
             return res.status(404).json({ error: "Session not found" });
         }
 
-        // Add event
+        // Add event (score deduction now handled by frontend)
         session.events.push({
             type,
             description,
@@ -100,30 +100,14 @@ app.post("/api/session/:id/event", async (req, res) => {
             timestamp: new Date(),
         });
 
-        // Update integrity score based on event severity
-        const deductions = {
-            low: 2,
-            medium: 5,
-            high: 10,
-        };
-
-        const deductionAmount = deductions[severity] || 5;
-        const oldScore = session.integrityScore;
-        session.integrityScore = Math.max(
-            0,
-            session.integrityScore - deductionAmount
-        );
-
-        console.log(
-            `Violation: ${type} (${severity}) - Deducted ${deductionAmount} points. Score: ${oldScore} → ${session.integrityScore}`
-        );
+        console.log(`Violation logged: ${type} (${severity}) - ${description}`);
 
         await session.save();
         res.json({
             success: true,
-            integrityScore: session.integrityScore,
-            deducted: deductionAmount,
+            eventLogged: true,
             violationType: type,
+            severity: severity,
         });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -218,6 +202,49 @@ app.post(
         }
     }
 );
+
+// Update session score
+app.patch("/api/session/:id/score", async (req, res) => {
+    try {
+        const { integrityScore } = req.body;
+        const session = await Session.findById(req.params.id);
+
+        if (!session) {
+            return res.status(404).json({ error: "Session not found" });
+        }
+
+        if (
+            typeof integrityScore !== "number" ||
+            integrityScore < 0 ||
+            integrityScore > 100
+        ) {
+            return res
+                .status(400)
+                .json({
+                    error: "Invalid integrity score. Must be a number between 0 and 100.",
+                });
+        }
+
+        const oldScore = session.integrityScore;
+        session.integrityScore = integrityScore;
+
+        await session.save();
+
+        console.log(
+            `Score updated: ${oldScore} → ${session.integrityScore} for session ${session._id}`
+        );
+
+        res.json({
+            success: true,
+            sessionId: session._id,
+            oldScore,
+            newScore: session.integrityScore,
+        });
+    } catch (error) {
+        console.error("Error updating score:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
 
 // Catch-all error handler for undefined routes
 app.use((req, res) => {

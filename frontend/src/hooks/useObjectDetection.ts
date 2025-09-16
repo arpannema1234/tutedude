@@ -76,7 +76,7 @@ export const useObjectDetection = ({
                 await tf.ready();
 
                 // Load COCO-SSD model
-                console.log("Loading object detection model...");
+                // console.log("Loading object detection model...");
                 const loadedModel = await cocoSsd.load({
                     modelUrl:
                         "https://tfhub.dev/tensorflow/tfjs-model/ssd_mobilenet_v2/1/default/1",
@@ -85,7 +85,7 @@ export const useObjectDetection = ({
 
                 setModel(loadedModel);
                 setIsLoaded(true);
-                console.log("Object detection model loaded successfully");
+                // console.log("Object detection model loaded successfully");
             } catch (error) {
                 console.error("Failed to load object detection model:", error);
             }
@@ -257,29 +257,26 @@ export const useObjectDetection = ({
                 onEvent(event);
             }
 
-            // Send to backend
+            // Send to backend (fire and forget - don't block detection)
             if (sessionId) {
-                try {
-                    const response = await fetch(
-                        `${
-                            import.meta.env.VITE_BACKEND_URL
-                        }/api/session/${sessionId}/event`,
-                        {
-                            method: "POST",
-                            headers: {
-                                "Content-Type": "application/json",
-                            },
-                            body: JSON.stringify(event),
-                        }
-                    );
-                    const result = await response.json();
-                    console.log("Object detection backend response:", result);
-                } catch (error) {
-                    console.error(
-                        "Failed to send object detection event:",
-                        error
-                    );
-                }
+                fetch(
+                    `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/event`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(event),
+                        signal: AbortSignal.timeout(2000), // 2 second timeout
+                    }
+                )
+                .then(response => {
+                    if (response.ok) {
+                        console.log("Object detection event sent to backend");
+                    }
+                })
+                .catch(() => {
+                    // Silently handle backend failures - continue with local detection
+                    console.log("Object detection continuing locally - backend unavailable");
+                });
             }
         }
     };

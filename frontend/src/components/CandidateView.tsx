@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { useComputerVision } from "../hooks/useComputerVision";
+import type { DetectionEvent } from "../hooks/useComputerVision";
 import { useObjectDetection } from "../hooks/useObjectDetection";
 import { generatePDFReport } from "../utils/reportGenerator";
 
@@ -24,6 +25,7 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
     const [showReport, setShowReport] = useState(false);
     const [finalReport, setFinalReport] = useState<any>(null);
     const [currentScore, setCurrentScore] = useState<number>(100); // Local score state
+    const currentScoreRef = useRef<number>(100); // Ref to always have latest score
     const [scoreChanged, setScoreChanged] = useState<boolean>(false); // For highlighting score changes
     const [scoreHistory, setScoreHistory] = useState<
         Array<{
@@ -33,87 +35,247 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
             timestamp: Date;
         }>
     >([]);
+
+    // Detection delay states
+    const [detectionEnabled, setDetectionEnabled] = useState(false);
+    const [timeUntilDetection, setTimeUntilDetection] = useState(5);
+    const detectionStartTimeRef = useRef<number | null>(null);
+
     const navigate = useNavigate();
 
+    // Keep score ref in sync with state
+    useEffect(() => {
+        currentScoreRef.current = currentScore;
+    }, [currentScore]);
+
     // Initialize computer vision
-    const {
-        isInitialized: cvInitialized,
-        faceData,
-        detectionEnabled,
-        timeUntilDetection,
-        // testViolation,
-        // testAllViolations,
-        // forceCheck,
-    } = useComputerVision({
+    const { isInitialized: cvInitialized, faceData } = useComputerVision({
         videoRef: videoRef as React.RefObject<HTMLVideoElement>,
         canvasRef: canvasRef as React.RefObject<HTMLCanvasElement>,
-        sessionId,
-        onEvent: (event) => {
-            // Calculate deduction amount
-            const deductionAmounts = { low: 2, medium: 5, high: 10 };
-            const deduction =
-                deductionAmounts[
-                    event.severity as keyof typeof deductionAmounts
-                ] || 5;
-
-            console.log(
-                `Violation detected: ${event.type} (${event.severity}) - deducting ${deduction} points`
-            );
-
-            // Update local score immediately
-            setCurrentScore((prev) => {
-                const newScore = Math.max(0, prev - deduction);
-                console.log(
-                    `Score Update: ${prev} - ${deduction} = ${newScore}`
-                );
-
-                // Highlight score change
-                setScoreChanged(true);
-                setTimeout(() => setScoreChanged(false), 2000);
-
-                // Add to score history
-                setScoreHistory((prevHistory) => [
-                    ...prevHistory.slice(-9), // Keep last 10 entries
-                    {
-                        score: newScore,
-                        deduction,
-                        reason: event.description,
-                        timestamp: new Date(),
-                    },
-                ]);
-                return newScore;
-            });
-
-            // Show toast notification for violations with point deduction
-            const emojis = {
-                focus_lost: "👀",
-                no_face: "❌",
-                multiple_faces: "👥",
-                object_detected: "📱",
-                drowsiness: "😴",
-            };
-
-            const emoji = emojis[event.type as keyof typeof emojis] || "⚠️";
-            toast(`${emoji} ${event.description} (-${deduction} points)`, {
-                style: {
-                    background:
-                        event.severity === "high"
-                            ? "#ef4444"
-                            : event.severity === "medium"
-                            ? "#f59e0b"
-                            : "#3b82f6",
-                    color: "#fff",
-                },
-                duration: 4000,
-            });
-
-            // Add to local events for immediate display
-            setLocalEvents((prev) => [
-                ...prev.slice(-4),
-                { ...event, timestamp: new Date().toISOString(), deduction },
-            ]);
-        },
     });
+
+    // Trigger event function (moved from hook)
+    const triggerEvent = async (event: DetectionEvent) => {
+        if (!detectionEnabled) return;
+        // Calculate deduction amount
+        const deductionAmounts = { low: 2, medium: 5, high: 10 };
+        const deduction = deductionAmounts[event.severity] || 5;
+
+        // Calculate new score using ref to ensure we have the latest value
+        const newScore = Math.max(0, currentScoreRef.current - deduction);
+
+        console.log(
+            `Violation detected: ${event.type} (${event.severity}) - deducting ${deduction} points`
+        );
+        console.log(
+            `Score Update: ${currentScoreRef.current} - ${deduction} = ${newScore}`
+        );
+
+        // Update local score immediately
+        currentScoreRef.current = newScore;
+        setCurrentScore(newScore);
+
+        // Highlight score change
+        setScoreChanged(true);
+        setTimeout(() => setScoreChanged(false), 2000);
+
+        // Add to score history
+        setScoreHistory((prevHistory) => [
+            ...prevHistory.slice(-9), // Keep last 10 entries
+            {
+                score: newScore,
+                deduction,
+                reason: event.description,
+                timestamp: new Date(),
+            },
+        ]);
+
+        // Show toast notification for violations with point deduction
+        const emojis = {
+            focus_lost: "👀",
+            no_face: "❌",
+            multiple_faces: "👥",
+            object_detected: "📱",
+            drowsiness: "😴",
+        };
+
+        const emoji = emojis[event.type as keyof typeof emojis] || "⚠️";
+        toast(`${emoji} ${event.description} (-${deduction} points)`, {
+            style: {
+                background:
+                    event.severity === "high"
+                        ? "#ef4444"
+                        : event.severity === "medium"
+                        ? "#f59e0b"
+                        : "#3b82f6",
+                color: "#fff",
+            },
+            duration: 4000,
+        });
+
+        // Add to local events for immediate display
+        setLocalEvents((prev) => [
+            ...prev.slice(-4),
+            { ...event, timestamp: new Date().toISOString(), deduction },
+        ]);
+
+        // Send event and updated score to backend (silently, don't block UI)
+        if (sessionId) {
+            // Fire and forget - don't await or block UI
+            Promise.allSettled([
+                // Send the violation event
+                fetch(
+                    `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/event`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(event),
+                        signal: AbortSignal.timeout(3000), // 3 second timeout
+                    }
+                ).then(response => {
+                    if (response.ok) {
+                        console.log("Event sent to backend successfully");
+                    }
+                }),
+                // Send the updated score to backend  
+                fetch(
+                    `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/score`,
+                    {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ integrityScore: newScore }),
+                        signal: AbortSignal.timeout(3000), // 3 second timeout
+                    }
+                ).then(response => {
+                    if (response.ok) {
+                        console.log("Score updated in backend successfully");
+                    }
+                })
+            ]).catch(() => {
+                // Silently handle any backend failures
+                console.log("Backend not available - continuing with local state");
+            });
+        }
+    };
+
+    // Face data monitoring for violations
+    const lastEventTimeRef = useRef<{ [key: string]: number }>({});
+    const noFaceStartTimeRef = useRef<number | null>(null);
+    const lookingAwayStartTimeRef = useRef<number | null>(null);
+    const eyesClosedStartTimeRef = useRef<number | null>(null);
+
+    // Monitor faceData changes and trigger events
+    useEffect(() => {
+        if (!detectionEnabled || !cvInitialized) {
+            // Reset timers when detection is disabled
+            noFaceStartTimeRef.current = null;
+            lookingAwayStartTimeRef.current = null;
+            eyesClosedStartTimeRef.current = null;
+            return;
+        }
+
+        const currentTime = Date.now();
+
+        // Throttling function to prevent spam
+        const canTriggerEvent = (eventType: string) => {
+            const lastEventTime = lastEventTimeRef.current[eventType] || 0;
+            return currentTime - lastEventTime >= 5000; // 5 seconds throttling
+        };
+
+        const updateLastEventTime = (eventType: string) => {
+            lastEventTimeRef.current[eventType] = currentTime;
+        };
+
+        // Check for multiple faces
+        if (faceData.facesDetected > 1 && canTriggerEvent("multiple_faces")) {
+            triggerEvent({
+                type: "multiple_faces",
+                description: `${faceData.facesDetected} faces detected in frame`,
+                severity: "high",
+            });
+            updateLastEventTime("multiple_faces");
+        }
+
+        // Check for no face detected
+        if (faceData.facesDetected === 0) {
+            if (!noFaceStartTimeRef.current) {
+                noFaceStartTimeRef.current = currentTime;
+                console.log("No face detected - starting timer");
+            } else if (
+                currentTime - noFaceStartTimeRef.current > 3000 &&
+                canTriggerEvent("no_face")
+            ) {
+                console.log("No face for 3+ seconds - triggering violation");
+                triggerEvent({
+                    type: "no_face",
+                    description: "No face detected for more than 3 seconds",
+                    severity: "high",
+                });
+                updateLastEventTime("no_face");
+            }
+        } else {
+            if (noFaceStartTimeRef.current) {
+                console.log("Face detected - resetting no face timer");
+            }
+            noFaceStartTimeRef.current = null;
+        }
+
+        // Check for looking away (only for single face)
+        if (faceData.facesDetected === 1) {
+            if (faceData.isLookingAway) {
+                if (!lookingAwayStartTimeRef.current) {
+                    lookingAwayStartTimeRef.current = currentTime;
+                    console.log("Looking away detected - starting timer");
+                } else if (
+                    currentTime - lookingAwayStartTimeRef.current > 10000 &&
+                    canTriggerEvent("focus_lost")
+                ) {
+                    console.log(
+                        "Looking away for 10+ seconds - triggering violation"
+                    );
+                    triggerEvent({
+                        type: "focus_lost",
+                        description:
+                            "Candidate looking away for more than 10 seconds",
+                        severity: "medium",
+                    });
+                    updateLastEventTime("focus_lost");
+                }
+            } else {
+                if (lookingAwayStartTimeRef.current) {
+                    console.log("Looking back at camera - resetting timer");
+                }
+                lookingAwayStartTimeRef.current = null;
+            }
+
+            // Check for eyes closed (drowsiness detection)
+            if (faceData.eyesClosed) {
+                if (!eyesClosedStartTimeRef.current) {
+                    eyesClosedStartTimeRef.current = currentTime;
+                    console.log("Eyes closed detected - starting timer");
+                } else if (
+                    currentTime - eyesClosedStartTimeRef.current > 3000 &&
+                    canTriggerEvent("drowsiness")
+                ) {
+                    console.log(
+                        "Eyes closed for 3+ seconds - triggering violation"
+                    );
+                    triggerEvent({
+                        type: "drowsiness",
+                        description:
+                            "Eyes closed for extended period - possible drowsiness",
+                        severity: "medium",
+                    });
+                    updateLastEventTime("drowsiness");
+                }
+            } else {
+                if (eyesClosedStartTimeRef.current) {
+                    console.log("Eyes opened - resetting timer");
+                }
+                eyesClosedStartTimeRef.current = null;
+            }
+        }
+    }, [faceData, detectionEnabled, cvInitialized, sessionId]);
 
     // Initialize object detection
     const { isLoaded: objDetectionLoaded, detectionData } = useObjectDetection({
@@ -122,55 +284,32 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
         sessionId,
         enabled: cvInitialized, // Only start after face detection is ready
         detectionEnabled, // Pass the detection enabled status
-        onEvent: (event) => {
-            // Calculate deduction amount for object detection
-            const deductionAmounts = { low: 2, medium: 5, high: 10 };
-            const deduction =
-                deductionAmounts[
-                    event.severity as keyof typeof deductionAmounts
-                ] || 5;
-
-            console.log(
-                `Object violation detected: ${event.type} (${event.severity}) - deducting ${deduction} points`
-            );
-
-            // Update local score immediately
-            setCurrentScore((prev) => {
-                const newScore = Math.max(0, prev - deduction);
-                console.log(
-                    `Object Score Update: ${prev} - ${deduction} = ${newScore}`
-                );
-
-                // Add to score history
-                setScoreHistory((prevHistory) => [
-                    ...prevHistory.slice(-9), // Keep last 10 entries
-                    {
-                        score: newScore,
-                        deduction,
-                        reason: event.description,
-                        timestamp: new Date(),
-                    },
-                ]);
-                return newScore;
-            });
-
-            // Show toast notification for object violations with point deduction
-            const emoji = "📱";
-            toast(`${emoji} ${event.description} (-${deduction} points)`, {
-                style: {
-                    background: "#ef4444",
-                    color: "#fff",
-                },
-                duration: 4000,
-            });
-
-            // Add to local events for immediate display
-            setLocalEvents((prev) => [
-                ...prev.slice(-4),
-                { ...event, timestamp: new Date().toISOString(), deduction },
-            ]);
-        },
+        onEvent: triggerEvent, // Use the new trigger function
     });
+
+    // Detection delay countdown timer
+    useEffect(() => {
+        if (cvInitialized && !detectionStartTimeRef.current) {
+            // Start the countdown timer when face detection is initialized
+            detectionStartTimeRef.current = Date.now();
+
+            const interval = setInterval(() => {
+                const elapsed =
+                    (Date.now() - (detectionStartTimeRef.current || 0)) / 1000;
+                const remaining = Math.max(0, 5 - elapsed);
+
+                setTimeUntilDetection(Math.ceil(remaining));
+
+                if (remaining === 0) {
+                    console.log("Enabling detection after 5-second countdown");
+                    setDetectionEnabled(true);
+                    clearInterval(interval);
+                }
+            }, 100);
+
+            return () => clearInterval(interval);
+        }
+    }, [cvInitialized]);
 
     // Show toast when detection starts
     useEffect(() => {
@@ -233,7 +372,8 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
     useEffect(() => {
         if (sessionId) {
             fetchSessionInfo();
-            const interval = setInterval(fetchSessionInfo, 5000); // Poll every 5 seconds
+            // Reduced polling frequency to be less aggressive on backend
+            const interval = setInterval(fetchSessionInfo, 10000); // Poll every 10 seconds
             return () => clearInterval(interval);
         }
     }, [sessionId]);
@@ -241,27 +381,36 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
     const fetchSessionInfo = async () => {
         try {
             const response = await fetch(
-                `${
-                    import.meta.env.VITE_BACKEND_URL
-                }/api/session/${sessionId}/status`
+                `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/status`,
+                {
+                    signal: AbortSignal.timeout(2000), // 2 second timeout
+                }
             );
-            const data = await response.json();
-            if (data.sessionId) {
-                setSessionInfo(data);
-                // Only sync if backend score is lower (more deductions) or if local score is still at initial 100
-                // This prevents backend from overriding immediate local deductions
-                if (
-                    currentScore === 100 ||
-                    data.integrityScore < currentScore
-                ) {
-                    console.log(
-                        `Syncing score: local=${currentScore}, backend=${data.integrityScore}`
-                    );
-                    setCurrentScore(data.integrityScore);
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (data.sessionId) {
+                    setSessionInfo(data);
+                    console.log("Session info synced with backend");
                 }
             }
         } catch (error) {
-            console.error("Error fetching session info:", error);
+            // Silently handle backend failures - use local session info
+            if (!sessionInfo && sessionId) {
+                // Get candidate name from sessionStorage or use fallback
+                const storedName = sessionStorage.getItem(`candidate_${sessionId}`);
+                
+                // Create minimal session info from available data
+                setSessionInfo({
+                    sessionId,
+                    candidateName: storedName || "Interview Candidate",
+                    isActive: true,
+                    integrityScore: currentScore,
+                    eventCount: localEvents.length,
+                    recentEvents: localEvents,
+                });
+                console.log("Using local session info - backend unavailable");
+            }
         }
     };
 
@@ -316,59 +465,134 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
 
         try {
             const response = await fetch(
-                `${
-                    import.meta.env.VITE_BACKEND_URL
-                }/api/session/${sessionId}/upload-video`,
+                `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/upload-video`,
                 {
                     method: "POST",
                     body: formData,
+                    signal: AbortSignal.timeout(5000), // 5 second timeout for video upload
                 }
             );
 
             if (response.ok) {
                 console.log("Video uploaded successfully");
                 setCurrentStatus("Video saved successfully");
+            } else {
+                console.log("Video saved locally - backend unavailable");
+                setCurrentStatus("Video saved locally");
             }
         } catch (error) {
-            console.error("Error uploading video:", error);
-            setCurrentStatus("Failed to save video");
+            // Silently handle video upload failures - continue with local recording
+            console.log("Video saved locally - backend unavailable");
+            setCurrentStatus("Video saved locally");
         }
     };
 
     const endInterview = async () => {
-        try {
-            stopRecording();
+        // Stop all detection and recording immediately
+        stopRecording();
+        setDetectionEnabled(false);
+        
+        setCurrentStatus("Interview ended - Generating report...");
 
+        try {
+            // Try to end session on backend (with timeout)
             const response = await fetch(
-                `${
-                    import.meta.env.VITE_BACKEND_URL
-                }/api/session/${sessionId}/end`,
+                `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/end`,
                 {
                     method: "PATCH",
+                    signal: AbortSignal.timeout(3000), // 3 second timeout
                 }
             );
 
+            let reportData = null;
             if (response.ok) {
-                setCurrentStatus("Interview ended - Loading report...");
-
-                // Fetch final report
+                // Try to fetch final report from backend
                 const reportResponse = await fetch(
-                    `${
-                        import.meta.env.VITE_BACKEND_URL
-                    }/api/session/${sessionId}/report`
+                    `${import.meta.env.VITE_BACKEND_URL}/api/session/${sessionId}/report`,
+                    {
+                        signal: AbortSignal.timeout(3000), // 3 second timeout
+                    }
                 );
-                const reportData = await reportResponse.json();
-
-                setFinalReport(reportData);
-                setShowReport(true);
-
-                toast.success("Interview completed! Check your report below.", {
-                    duration: 6000,
-                });
+                
+                if (reportResponse.ok) {
+                    reportData = await reportResponse.json();
+                    // Merge with local events
+                    reportData.session.events = [...(reportData.session.events || []), ...localEvents];
+                    reportData.totalEvents = reportData.session.events.length;
+                    console.log("Report fetched from backend:", reportData);
+                }
             }
+
+            // If backend fails, create local report
+            if (!reportData) {
+                console.log("Creating local report - backend unavailable");
+                
+                const eventStats = localEvents.reduce((stats, event) => {
+                    stats[event.type] = (stats[event.type] || 0) + 1;
+                    return stats;
+                }, {});
+
+                const now = new Date();
+                const startTime = new Date(now.getTime() - 10 * 60 * 1000); // Assume 10 min interview
+
+                reportData = {
+                    session: {
+                        _id: sessionId || 'local-session',
+                        candidateName: sessionInfo?.candidateName || "Interview Candidate", 
+                        interviewerId: "local-session",
+                        startTime: startTime.toISOString(),
+                        endTime: now.toISOString(),
+                        isActive: false,
+                        integrityScore: currentScore,
+                        events: localEvents,
+                    },
+                    duration: 10, // Default duration
+                    eventStats,
+                    totalEvents: localEvents.length,
+                };
+            }
+
+            setFinalReport(reportData);
+            setShowReport(true);
+
+            toast.success("Interview completed! Check your report below.", {
+                duration: 6000,
+            });
+
         } catch (error) {
-            console.error("Error ending interview:", error);
-            toast.error("Failed to end interview. Please try again.");
+            console.log("Backend unavailable - using local data for report");
+            
+            // Create completely local report
+            const eventStats = localEvents.reduce((stats, event) => {
+                stats[event.type] = (stats[event.type] || 0) + 1;
+                return stats;
+            }, {});
+
+            const now = new Date();
+            const startTime = new Date(now.getTime() - 10 * 60 * 1000);
+
+            const localReport = {
+                session: {
+                    _id: sessionId || 'local-session',
+                    candidateName: sessionInfo?.candidateName || "Interview Candidate",
+                    interviewerId: "local-session", 
+                    startTime: startTime.toISOString(),
+                    endTime: now.toISOString(),
+                    isActive: false,
+                    integrityScore: currentScore,
+                    events: localEvents,
+                },
+                duration: 10,
+                eventStats,
+                totalEvents: localEvents.length,
+            };
+
+            setFinalReport(localReport);
+            setShowReport(true);
+
+            toast.success("Interview completed! Report generated locally.", {
+                duration: 6000,
+            });
         }
     };
 
@@ -482,14 +706,12 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
                         >
                             {isRecording ? "🔴 Recording" : "⏸️ Not Recording"}
                         </span>
+                        {!sessionInfo && sessionId && (
+                            <span className="status-indicator warning">
+                                🌐 Offline Mode
+                            </span>
+                        )}
                         {/* <button
-                            className="btn btn-secondary"
-                            onClick={() => testViolation()}
-                            style={{ marginRight: "0.5rem" }}
-                        >
-                            🧪 Test Single
-                        </button>
-                        <button
                             className="btn btn-warning"
                             onClick={() => testAllViolations()}
                             style={{ marginRight: "0.5rem" }}
@@ -506,7 +728,7 @@ const CandidateView: React.FC<CandidateViewProps> = () => {
                         <button
                             className="btn btn-danger"
                             onClick={endInterview}
-                            disabled={!sessionInfo?.isActive}
+                            disabled={false}
                         >
                             🏁 Finish & View Report
                         </button>

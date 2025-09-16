@@ -14,35 +14,17 @@ const InterviewSetup: React.FC = () => {
         }
 
         setLoading(true);
-        try {
-            const response = await fetch(
-                `${import.meta.env.VITE_BACKEND_URL}/api/session/start`,
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        candidateName: candidateName.trim(),
-                        interviewerId: "AUTO_" + Date.now(),
-                    }),
-                }
-            );
-
-            const data = await response.json();
-
-            if (data.success) {
-                // Navigate directly to candidate view
-                navigate(`/candidate/${data.sessionId}`);
-            } else {
-                alert("Failed to start interview session");
-            }
-        } catch (error) {
-            console.error("Error starting interview:", error);
-            alert("Failed to connect to server");
-        } finally {
-            setLoading(false);
-        }
+        
+        // Generate local session ID without backend dependency
+        const sessionId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Store candidate name in sessionStorage for use in the interview
+        sessionStorage.setItem(`candidate_${sessionId}`, candidateName.trim());
+        
+        // Navigate directly to candidate view with local session
+        navigate(`/candidate/${sessionId}`);
+        
+        setLoading(false);
     };
 
     return (

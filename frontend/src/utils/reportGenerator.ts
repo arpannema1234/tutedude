@@ -14,6 +14,7 @@ interface SessionReport {
             description: string;
             timestamp: string;
             severity: string;
+            deduction: number;
         }>;
     };
     duration: number;
@@ -22,6 +23,7 @@ interface SessionReport {
 }
 
 export const generatePDFReport = (reportData: SessionReport): void => {
+    console.log(reportData);
     const pdf = new jsPDF();
     const pageWidth = pdf.internal.pageSize.getWidth();
     const margin = 20;
@@ -111,10 +113,11 @@ export const generatePDFReport = (reportData: SessionReport): void => {
             pdf.text(eventText, margin + 10, yPosition);
             yPosition += 7;
         });
-    } else {
-        pdf.text("No violations detected", margin + 10, yPosition);
-        yPosition += 7;
     }
+    // else {
+    //     pdf.text("No violations detected", margin + 10, yPosition);
+    //     yPosition += 7;
+    // }
 
     yPosition += 10;
 
